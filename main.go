@@ -1,3 +1,4 @@
+// main.go
 package main
 
 import (
@@ -12,7 +13,6 @@ import (
 
 	// Internal packages
 	"github.com/crazyuploader/fiber-otel/internal/metrics"
-	"google.golang.org/grpc/credentials"
 
 	// Import Fiber related packages
 	"github.com/gofiber/fiber/v2"
@@ -26,6 +26,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.34.0"
+	"google.golang.org/grpc/credentials"
 )
 
 // Prepare our environment variable(s)
@@ -149,7 +150,7 @@ func main() {
 		// Sleep for a few milliseconds
 		time.Sleep(time.Millisecond * time.Duration(number))
 
-		// Get latest time
+		// Get elapsed time
 		duration := time.Since(initialTime).Seconds()
 
 		// Record elapsed duration in metrics histogram
