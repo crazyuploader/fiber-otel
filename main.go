@@ -5,35 +5,64 @@ import (
 	"context"
 	"errors"
 	"log"
+	"math/rand"
+	"os"
+	"strings"
 	"time"
 
-	// Import Fiber related packages
+	// Internal packages
 	"github.com/crazyuploader/fiber-otel/internal/metrics"
+	"google.golang.org/grpc/credentials"
+
+	// Import Fiber related packages
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 
 	// Import OpenTelemetry related packages
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.34.0"
 )
 
+// Prepare our environment variable(s)
+var (
+	serviceName  = os.Getenv("SERVICE_NAME")
+	collectorURL = os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	insecure     = os.Getenv("INSECURE_MODE")
+)
+
 // Function to initialize Meter Provider
 func initMeter() (*sdkmetric.MeterProvider, error) {
+	var secureOptions otlpmetricgrpc.Option
+
+	if strings.ToLower(insecure) == "false" {
+		secureOptions = otlpmetricgrpc.WithTLSCredentials(credentials.NewClientTLSFromCert(nil, ""))
+	} else {
+		secureOptions = otlpmetricgrpc.WithInsecure()
+	}
+
 	// Create an exporter
-	exporter, err := stdoutmetric.New(stdoutmetric.WithPrettyPrint())
+	exporter, err := otlpmetricgrpc.New(
+		context.Background(),
+		secureOptions,
+		otlpmetricgrpc.WithEndpoint(collectorURL))
 	if err != nil {
 		return nil, err
 	}
 
 	// Create a Meter Provider
 	mp := sdkmetric.NewMeterProvider(
-		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter)),
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter,
+			sdkmetric.WithInterval(time.Second*5))),
 		sdkmetric.WithResource(resource.NewWithAttributes(
 			semconv.SchemaURL,
-			semconv.ServiceNameKey.String("fiber-app"),
+			semconv.ServiceNameKey.String(serviceName),
+			attribute.String("environment", "demo"),
+			attribute.String("language", "go"),
 		)),
 	)
 
@@ -60,7 +89,7 @@ func main() {
 	}()
 
 	// Initialize our custom metrics
-	appMetrics, err := metrics.NewMetric("fiber-app")
+	appMetrics, err := metrics.NewMetric("fiber-api-server")
 	if err != nil {
 		log.Fatal("Failed to initialize custom metrics", err)
 	}
@@ -93,7 +122,10 @@ func main() {
 		errorCount++
 
 		// Increment error metrics counter
-		appMetrics.ErrorCount.Add(ctx, 1)
+		appMetrics.ErrorCount.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("endpoint", "/error"),
+			attribute.String("method", "GET"),
+		))
 		log.Println("Errors:", errorCount)
 		return errors.New("simulated error")
 	})
@@ -109,14 +141,22 @@ func main() {
 		// Store current time
 		initialTime := time.Now()
 
-		// Sleep for 3 seconds
-		time.Sleep(time.Second * 3)
+		// Random int from 0 to 100
+		source := rand.NewSource(time.Now().Unix())
+		r := rand.New(source)
+		number := r.Intn(100)
+
+		// Sleep for a few milliseconds
+		time.Sleep(time.Millisecond * time.Duration(number))
 
 		// Get latest time
-		duration := time.Since(initialTime).Milliseconds()
+		duration := time.Since(initialTime).Seconds()
 
 		// Record elapsed duration in metrics histogram
-		appMetrics.RequestLatency.Record(ctx, float64(duration))
+		appMetrics.RequestLatency.Record(ctx, float64(duration), metric.WithAttributes(
+			attribute.String("endpoint", "/latency"),
+			attribute.String("method", "GET"),
+		))
 		return c.JSON(fiber.Map{"status": "ok",
 			"response_time": time.Since(initialTime).String(),
 		})

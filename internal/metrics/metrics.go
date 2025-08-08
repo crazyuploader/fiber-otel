@@ -26,21 +26,25 @@ func NewMetric(meterName string) (*Metrics, error) {
 	meter := otel.Meter(meterName)
 
 	// Add a counter for storing error count
-	errorCount, err := meter.Int64Counter("api.requests_errors_total",
+	errorCount, err := meter.Int64Counter("showcase.fiber.api.requests_errors_total",
 		metric.WithDescription("Total number of errors encountered by the API Server"))
 	if err != nil {
 		return nil, err
 	}
 
 	// Add a histogram for aggregating response time over the time
-	requestLatency, err := meter.Float64Histogram("http.request_duration",
-		metric.WithDescription("Total duration of a request"))
+	requestLatency, err := meter.Float64Histogram("showcase.fiber.http.request_duration_seconds",
+		metric.WithDescription("Duration of HTTP requests in seconds"),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(
+			0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+		))
 	if err != nil {
 		return nil, err
 	}
 
 	// Add a gauge type metric for storing total number of items in our cart
-	cartItems, err := meter.Int64ObservableGauge("user.cart_items_count",
+	cartItems, err := meter.Int64ObservableGauge("showcase.fiber.user.cart_items_count",
 		metric.WithDescription("Total items of user cart in the API Server"))
 	if err != nil {
 		return nil, err
@@ -54,14 +58,14 @@ func NewMetric(meterName string) (*Metrics, error) {
 	}
 
 	// Invoke a callback function for handling our observable gauge
-	meter.RegisterCallback(func(ctx context.Context, observer metric.Observer) error {
+	_, err = meter.RegisterCallback(func(ctx context.Context, observer metric.Observer) error {
 		currentValue := atomic.LoadInt64(&m.totalCartItems)
 		observer.ObserveInt64(m.CartItems, currentValue)
 		return nil
 	}, cartItems)
 
 	// Return meter provider
-	return m, nil
+	return m, err
 }
 
 // Function to set items in cart initially
