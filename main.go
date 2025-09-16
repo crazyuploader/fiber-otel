@@ -4,7 +4,7 @@ package main
 import (
 	// Standard packages
 	"context"
-	"errors"
+	"fmt"
 	"log"
 	"math/rand"
 	"os"
@@ -15,6 +15,7 @@ import (
 	"github.com/crazyuploader/fiber-otel/internal/metrics"
 
 	// Import Fiber related packages
+	"github.com/gofiber/contrib/otelfiber/v2"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 
@@ -22,9 +23,11 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/metric"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.34.0"
 	"google.golang.org/grpc/credentials"
 )
@@ -74,18 +77,66 @@ func initMeter() (*sdkmetric.MeterProvider, error) {
 	return mp, nil
 }
 
+// Function to initialize Tracer Provider
+func initTracer() (*sdktrace.TracerProvider, error) {
+	var secureOptions otlptracegrpc.Option
+
+	if strings.ToLower(insecure) == "false" {
+		secureOptions = otlptracegrpc.WithTLSCredentials(credentials.NewClientTLSFromCert(nil, ""))
+	} else {
+		secureOptions = otlptracegrpc.WithInsecure()
+	}
+
+	// Create an exporter
+	exporter, err := otlptracegrpc.New(
+		context.Background(),
+		secureOptions,
+		otlptracegrpc.WithEndpoint(collectorURL))
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a Tracer Provider
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(
+			resource.NewWithAttributes(
+				semconv.SchemaURL,
+				semconv.ServiceNameKey.String(serviceName),
+				attribute.String("environment", "demo"),
+				attribute.String("language", "go"),
+			)),
+	)
+
+	// Set Tracer Provider globally
+	otel.SetTracerProvider(tp)
+
+	// Return Tracer Provider
+	return tp, nil
+}
+
 // Main function of the Go Fiber API Server
 func main() {
-	// Initialize OpenTelemetry MeterProvider
+	// Initialize OpenTelemetry Meter Provider
 	mp, err := initMeter()
 	if err != nil {
 		log.Fatal("Failed to initialize Meter Provider", err)
 	}
 
-	// Make sure to shut down the Meter Provider
+	// Initialize OpenTelemetry Tracer Provider
+	tp, err := initTracer()
+	if err != nil {
+		log.Fatal("Failed to initialize Tracer Provider", err)
+	}
+
+	// Make sure to shut down the Meter & Tracer Provider
 	defer func() {
 		if err := mp.Shutdown(context.Background()); err != nil {
 			log.Println("Error shutting down Meter Provider", err)
+		}
+		if err = tp.Shutdown(context.Background()); err != nil {
+			log.Println("Error shutting down Tracer Provider", err)
 		}
 	}()
 
@@ -103,6 +154,9 @@ func main() {
 
 	// Use Fiber logger middleware for logging
 	app.Use(logger.New())
+
+	// Use OTel Fiber Middleware
+	app.Use(otelfiber.Middleware(otelfiber.WithTracerProvider(tp)))
 
 	// Root Endpoint
 	// GET <> Endpoint: /
@@ -128,7 +182,7 @@ func main() {
 			attribute.String("method", "GET"),
 		))
 		log.Println("Errors:", errorCount)
-		return errors.New("simulated error")
+		return fmt.Errorf("simulated error: %d", errorCount)
 	})
 
 	// Endpoint to check the processed latency; simulated by time.Sleep() function
