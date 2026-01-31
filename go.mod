@@ -4,7 +4,7 @@ go 1.24.4
 
 require (
 	github.com/gofiber/contrib/otelfiber/v2 v2.2.3
-	github.com/gofiber/fiber/v2 v2.52.10
+	github.com/gofiber/fiber/v2 v2.52.11
 	go.opentelemetry.io/otel v1.39.0
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.39.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.39.0
